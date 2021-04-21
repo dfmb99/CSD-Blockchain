@@ -1,3 +1,6 @@
+# InteliJ settings folders
+.idea/
+
 # Target folder
 target/
 
