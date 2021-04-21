@@ -29,4 +29,8 @@ public class Transaction implements Serializable {
 		return this.amount;
 	}
 
+	public void printTransactionData() {
+		System.out.println("Sender: " + this.sender + " \n Receiver: " + this.receiver + " \n Amount: " + this.amount + " \n --------");
+	}
+
 }
