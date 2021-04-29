@@ -19,6 +19,7 @@ import bftsmart.tom.MessageContext;
 import bftsmart.tom.ServiceProxy;
 import bftsmart.tom.ServiceReplica;
 import bftsmart.tom.server.defaultservices.DefaultSingleRecoverable;
+import data.Block;
 import data.ObtainCoinsParams;
 import data.TransferCoinsParams;
 import data.Transaction;
@@ -28,20 +29,20 @@ import data.Transaction;
 public class WalletResource extends DefaultSingleRecoverable {
 
     private final String base_dir = System.getProperty("java.io.tmpdir");
-    private String filename;
+    private final String filename;
     private final Map<String, Double> userBalances;
-    private final Map<Long,Transaction> transactions;
+    private Map<Long, Transaction> transactions;
     private ObjectOutputStream out;
     private final ServiceProxy counterProxy;
-    private long size;
+    private long height;
 
     public WalletResource(int id, int processID) throws Exception {
         new ServiceReplica(id, this, this);
         this.counterProxy = new ServiceProxy(processID);
-        this.filename = "transactions_" + id +".data";
+        this.filename = "transactions" + id + ".data";
         this.transactions = new TreeMap<>();
         this.userBalances = new TreeMap<>();
-        this.size = 0;
+        this.height = 0;
 
         this.loadMemoryData();
     }
@@ -54,7 +55,7 @@ public class WalletResource extends DefaultSingleRecoverable {
             ObjectInputStream is = new ObjectInputStream(new FileInputStream(base_dir + filename));
             while (true) {
                 try {
-                    this.transactions.put(size++, (Transaction) is.readObject());
+                    this.transactions.put(height++, (Transaction) is.readObject());
                 } catch (Exception e) {
                     break;
                 }
@@ -76,7 +77,7 @@ public class WalletResource extends DefaultSingleRecoverable {
     @Path("/receive")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.TEXT_PLAIN)
-    public double obtainCoins(ObtainCoinsParams p) throws IOException {
+    public double obtainCoins(ObtainCoinsParams p) throws IOException, InterruptedException {
         if (!p.isDataValid()) {
             throw new WebApplicationException(Status.BAD_REQUEST);
         }
@@ -85,12 +86,8 @@ public class WalletResource extends DefaultSingleRecoverable {
         double amount = p.getAmount();
         Transaction t = new Transaction(null, addr, amount);
         synchronized (this) {
-            transactions.put(this.size++, t);
-            out.writeObject(t);
             this.sendTransactionBFT(t);
-            userBalances.merge(addr, amount, Double::sum);
         }
-
         return userBalances.get(addr);
     }
 
@@ -109,38 +106,10 @@ public class WalletResource extends DefaultSingleRecoverable {
         if (!hasSpendableBalance(sender, amount)) {
             throw new WebApplicationException(Status.FORBIDDEN);
         }
+        Transaction t = new Transaction(sender, receiver, amount);
         synchronized (this) {
-            Transaction t = new Transaction(sender, receiver, amount);
-            transactions.put(this.size++, t);
-            out.writeObject(t);
             this.sendTransactionBFT(t);
-            userBalances.put(sender, userBalances.get(sender) - amount);
-            userBalances.merge(receiver, amount, Double::sum);
         }
-    }
-
-    /**
-     * Broadcast transaction to other nodes
-     */
-    private void sendTransactionBFT(Transaction t) {
-        try {
-            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            ObjectOutputStream oos = new ObjectOutputStream(buffer);
-            oos.writeObject(t);
-            oos.close();
-            byte[] reply = counterProxy.invokeOrdered(buffer.toByteArray());
-            System.out.println("sent transaction");
-
-            if (reply != null) {
-                Transaction t_final = (Transaction) new ObjectInputStream(new ByteArrayInputStream(reply)).readObject();
-                System.out.println(t_final);
-            } else {
-                System.out.println(", ERROR! Exiting.");
-            }
-        } catch (IOException | NumberFormatException | ClassNotFoundException e) {
-            counterProxy.close();
-        }
-
     }
 
     @GET
@@ -167,6 +136,30 @@ public class WalletResource extends DefaultSingleRecoverable {
     public List<Transaction> getTransactionsOf(@PathParam("addr") String addr) {
         return transactions.values().stream().filter(t -> t.getReceiver().equals(addr) || t.getSender().equals(addr))
                 .collect(Collectors.toList());
+    }
+
+
+    /**
+     * Broadcast transaction to other nodes
+     */
+    private void sendTransactionBFT(Transaction t) {
+        try {
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            ObjectOutputStream oos = new ObjectOutputStream(buffer);
+            oos.writeObject(new Block(this.height++, t));
+            oos.close();
+            byte[] reply = counterProxy.invokeOrdered(buffer.toByteArray());
+
+            if (reply != null) {
+                Block block = (Block) new ObjectInputStream(new ByteArrayInputStream(reply)).readObject();
+                System.out.println(block.getHeight());
+            } else {
+                System.out.println(", ERROR! Exiting.");
+            }
+        } catch (IOException | NumberFormatException | ClassNotFoundException e) {
+            counterProxy.close();
+        }
+
     }
 
     /**
@@ -214,9 +207,10 @@ public class WalletResource extends DefaultSingleRecoverable {
     @Override
     public byte[] appExecuteOrdered(byte[] command, MessageContext msgCtx) {
         try {
-            Transaction t = (Transaction) new ObjectInputStream(new ByteArrayInputStream(command)).readObject();
-            t.printTransactionData();
-            transactions.put(this.size++, t);
+            Block b = (Block) new ObjectInputStream(new ByteArrayInputStream(command)).readObject();
+            System.out.println(b.getHeight());
+            Transaction t = b.getTransaction();
+            transactions.put(b.getHeight(), t);
             out.writeObject(t);
             String sender = t.getSender();
             String receiver = t.getReceiver();
@@ -228,7 +222,7 @@ public class WalletResource extends DefaultSingleRecoverable {
 
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
             ObjectOutputStream oos = new ObjectOutputStream(buffer);
-            oos.writeObject(t);
+            oos.writeObject(b);
             oos.close();
             return buffer.toByteArray();
         } catch (IOException | ClassNotFoundException ex) {
@@ -249,17 +243,16 @@ public class WalletResource extends DefaultSingleRecoverable {
     @SuppressWarnings("unchecked")
     @Override
     public void installSnapshot(byte[] state) {
-        /**
         try {
             ByteArrayInputStream bis = new ByteArrayInputStream(state);
             ObjectInput in = new ObjectInputStream(bis);
-            this.transactions = (List<Transaction>) in.readObject();
+            this.transactions = (Map<Long, Transaction>) in.readObject();
             in.close();
             bis.close();
         } catch (IOException | ClassNotFoundException e) {
             System.err.println("[ERROR] Error deserializing state: "
                     + e.getMessage());
-        }**/
+        }
     }
 
     @Override

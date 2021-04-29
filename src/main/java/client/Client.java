@@ -11,7 +11,7 @@ public class Client {
 
     public static void main(String[] args) throws Exception {
         Scanner scanner = new Scanner(System.in);
-        WalletResource w = new WalletResource(3, 1003);
+        WalletResource w = new WalletResource(3, 1004);
         boolean exit = false;
         while(!exit) {
             String input = scanner.nextLine();
@@ -19,8 +19,17 @@ public class Client {
                 case "obtainCoins":
                     System.out.println(w.obtainCoins(new ObtainCoinsParams("1", 10)));
                     break;
-                case "transactions":
+                case "transferCoins":
                     System.out.println(Arrays.toString(w.getTransactionsData()));
+                    break;
+                case "AllTransactions":
+                    // TODO
+                    break;
+                case "getTransactions":
+                    // TODO
+                    break;
+                case "getBalance":
+                    // TODO
                     break;
                 case "exit":
                     System.out.println("Client exiting...");
