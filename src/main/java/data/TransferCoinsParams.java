@@ -7,7 +7,7 @@ public class TransferCoinsParams {
 	
 	public TransferCoinsParams() { }
 	
-	public TransferCoinsParams(String sender, String receiver, Double amount) {
+	public TransferCoinsParams(String sender, String receiver, double amount) {
 		this.sender = sender;
 		this.receiver = receiver;
 		this.amount = amount;
@@ -26,6 +26,6 @@ public class TransferCoinsParams {
 	}
 	
 	public boolean isDataValid() {
-		return this.sender != null && this.sender != "" && this.receiver != null && this.receiver != "" && this.amount > 0;
+		return this.sender != null && this.sender != "" && this.receiver != null && !this.receiver.equals("") && this.amount > 0;
 	}
 }

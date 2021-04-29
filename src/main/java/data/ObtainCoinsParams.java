@@ -20,6 +20,6 @@ public class ObtainCoinsParams {
 	}
 	
 	public boolean isDataValid() {
-		return this.address != null && this.address != "" && this.amount > 0;
+		return this.address != null && !this.address.equals("") && this.amount > 0;
 	}
 }
