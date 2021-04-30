@@ -29,44 +29,54 @@ public class Client {
     static Gson gson = new Gson();
 
     public static void main(String[] args) throws Exception {
+        System.out.println(" ------- P2P Wallet Service client ---------");
+        System.out.println(" ( Type help for command list in prompt ) ");
+        System.out.println(" -------------------------------------------- ");
         Scanner scanner = new Scanner(System.in);
-        System.out.println("Server address: ");
+        System.out.print("Server address: ");
         String ip = scanner.nextLine();
-        System.out.println("Port: ");
+        System.out.print("Port: ");
         int port = scanner.nextInt();
         scanner.nextLine();
         boolean exit = false;
         while (!exit) {
+            System.out.print("> ");
             String input = scanner.nextLine();
             switch (input) {
                 case "obtainCoins":
-                    System.out.println("Address to receive coins :");
+                    System.out.print("Address to receive coins: ");
                     String addr = scanner.nextLine();
-                    System.out.println("Amount :");
+                    System.out.print("Amount: ");
                     int amnt = scanner.nextInt();
                     scanner.nextLine();
                     System.out.println(obtainCoins(ip, port, new ObtainCoinsParams(addr, amnt)));
                     break;
                 case "transferCoins":
-                    System.out.println("Sender address:");
+                    System.out.print("Sender address: ");
                     String sender = scanner.nextLine();
-                    System.out.println("Receiver address:");
+                    System.out.print("Receiver address: ");
                     String rec = scanner.nextLine();
-                    System.out.println("Amount :");
+                    System.out.print("Amount: ");
                     amnt = scanner.nextInt();
                     scanner.nextLine();
                     transferCoins(ip, port, new TransferCoinsParams(sender, rec, amnt));
                     break;
                 case "AllTransactions":
-                    System.out.println(getAllTransactions(ip, port));
+                    List<Transaction> res = getAllTransactions(ip, port);
+                    for(Transaction t: res) {
+                        t.printTransactionData();
+                    }
                     break;
                 case "getTransactions":
-                    System.out.println("Address: ");
+                    System.out.print("Address: ");
                     addr = scanner.nextLine();
-                    System.out.println(getTransactionsOf(ip, port, addr));
+                    res = getTransactionsOf(ip, port, addr);
+                    for(Transaction t: res) {
+                        t.printTransactionData();
+                    }
                     break;
                 case "getBalance":
-                    System.out.println("Address: ");
+                    System.out.print("Address: ");
                     addr = scanner.nextLine();
                     System.out.println(getBalanceOf(ip, port, addr));
                     break;
@@ -75,7 +85,7 @@ public class Client {
                     exit = true;
                     break;
                 default:
-                    System.out.println("Unknown command.");
+                    System.out.println("Unknown command. Type help for command list.");
             }
         }
     }

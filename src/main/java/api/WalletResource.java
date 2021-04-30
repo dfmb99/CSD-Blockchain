@@ -30,9 +30,9 @@ public class WalletResource extends DefaultSingleRecoverable {
 
     private final String base_dir = System.getProperty("java.io.tmpdir");
     private final String filename;
-    private final Map<String, Double> userBalances;
+    private Map<String, Double> userBalances;
     private Map<Long, Transaction> transactions;
-    private ObjectOutputStream out;
+   // private ObjectOutputStream out;
     private final ServiceProxy counterProxy;
     private long height;
 
@@ -40,16 +40,21 @@ public class WalletResource extends DefaultSingleRecoverable {
         new ServiceReplica(id, this, this);
         this.counterProxy = new ServiceProxy(processID);
         this.filename = "transactions" + id + ".data";
-        this.transactions = new TreeMap<>();
-        this.userBalances = new TreeMap<>();
-        this.height = 0;
+        if ( this.transactions == null ) {
+            this.transactions = new TreeMap<>();
+            this.userBalances = new TreeMap<>();
+            this.height = 0;
+        }
+        //this.transactions = new TreeMap<>();
+        //this.userBalances = new TreeMap<>();
+        //this.height = 0;
 
-        this.loadMemoryData();
+       // this.loadMemoryData();
     }
 
     /**
      * Loads transactions data from local memory if available, and only after connects to other nodes
-     */
+     *
     private void loadMemoryData() throws Exception {
         try {
             ObjectInputStream is = new ObjectInputStream(new FileInputStream(base_dir + filename));
@@ -71,7 +76,7 @@ public class WalletResource extends DefaultSingleRecoverable {
                 reset();
             }
         };
-    }
+    }*/
 
     @POST
     @Path("/receive")
@@ -133,9 +138,10 @@ public class WalletResource extends DefaultSingleRecoverable {
     @GET
     @Path("/transactions/{addr}")
     @Produces(MediaType.APPLICATION_JSON)
-    public List<Transaction> getTransactionsOf(@PathParam("addr") String addr) {
-        return transactions.values().stream().filter(t -> t.getReceiver().equals(addr) || t.getSender().equals(addr))
-                .collect(Collectors.toList());
+    public Transaction[] getTransactionsOf(@PathParam("addr") String addr) {
+        System.out.println(transactions.values().size());
+        return transactions.values().stream().filter(t -> t.getReceiver().equals(addr) || (t.getSender() != null && t.getSender().equals(addr)))
+                .toArray(Transaction[]::new);
     }
 
 
@@ -146,13 +152,15 @@ public class WalletResource extends DefaultSingleRecoverable {
         try {
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
             ObjectOutputStream oos = new ObjectOutputStream(buffer);
-            oos.writeObject(new Block(this.height++, t));
+            oos.writeObject(new Block(this.height, t));
             oos.close();
+            System.out.println("sendTransactionBFT 1: ");
             byte[] reply = counterProxy.invokeOrdered(buffer.toByteArray());
+            System.out.println("sendTransactionBFT 2: ");
 
             if (reply != null) {
                 Block block = (Block) new ObjectInputStream(new ByteArrayInputStream(reply)).readObject();
-                System.out.println(block.getHeight());
+                // TODO
             } else {
                 System.out.println(", ERROR! Exiting.");
             }
@@ -208,10 +216,10 @@ public class WalletResource extends DefaultSingleRecoverable {
     public byte[] appExecuteOrdered(byte[] command, MessageContext msgCtx) {
         try {
             Block b = (Block) new ObjectInputStream(new ByteArrayInputStream(command)).readObject();
-            System.out.println(b.getHeight());
             Transaction t = b.getTransaction();
             transactions.put(b.getHeight(), t);
-            out.writeObject(t);
+            this.height++;
+            //out.writeObject(t);
             String sender = t.getSender();
             String receiver = t.getReceiver();
             double amount = t.getAmount();
@@ -243,27 +251,20 @@ public class WalletResource extends DefaultSingleRecoverable {
     @SuppressWarnings("unchecked")
     @Override
     public void installSnapshot(byte[] state) {
-        try {
-            ByteArrayInputStream bis = new ByteArrayInputStream(state);
-            ObjectInput in = new ObjectInputStream(bis);
-            this.transactions = (Map<Long, Transaction>) in.readObject();
-            in.close();
-            bis.close();
-        } catch (IOException | ClassNotFoundException e) {
-            System.err.println("[ERROR] Error deserializing state: "
-                    + e.getMessage());
-        }
+       this.transactions = new TreeMap<>();
+       this.userBalances = new TreeMap<>();
+       this.height = 0;
     }
 
     @Override
     public byte[] getSnapshot() {
         try {
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            ObjectOutput out = new ObjectOutputStream(bos);
-            out.writeObject(this.transactions);
-            out.flush();
+            ObjectOutput o = new ObjectOutputStream(bos);
+            o.writeObject(this.transactions);
+            o.flush();
             bos.flush();
-            out.close();
+            o.close();
             bos.close();
             return bos.toByteArray();
         } catch (IOException ioe) {
