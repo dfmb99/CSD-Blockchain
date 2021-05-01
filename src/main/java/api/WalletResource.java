@@ -28,55 +28,21 @@ import data.Transaction;
 @Path("/wallet")
 public class WalletResource extends DefaultSingleRecoverable {
 
-    private final String base_dir = System.getProperty("java.io.tmpdir");
-    private final String filename;
     private Map<String, Double> userBalances;
     private Map<Long, Transaction> transactions;
-   // private ObjectOutputStream out;
     private final ServiceProxy counterProxy;
     private long height;
 
     public WalletResource(int id, int processID) throws Exception {
         new ServiceReplica(id, this, this);
         this.counterProxy = new ServiceProxy(processID);
-        this.filename = "transactions" + id + ".data";
+
         if ( this.transactions == null ) {
             this.transactions = new TreeMap<>();
             this.userBalances = new TreeMap<>();
             this.height = 0;
         }
-        //this.transactions = new TreeMap<>();
-        //this.userBalances = new TreeMap<>();
-        //this.height = 0;
-
-       // this.loadMemoryData();
     }
-
-    /**
-     * Loads transactions data from local memory if available, and only after connects to other nodes
-     *
-    private void loadMemoryData() throws Exception {
-        try {
-            ObjectInputStream is = new ObjectInputStream(new FileInputStream(base_dir + filename));
-            while (true) {
-                try {
-                    this.transactions.put(height++, (Transaction) is.readObject());
-                } catch (Exception e) {
-                    break;
-                }
-            }
-
-            this.updateAccountBalances();
-        } catch (IOException e) {
-            ObjectOutputStream os1 = new ObjectOutputStream(new FileOutputStream(base_dir + filename));
-            os1.close();
-        }
-        out = new ObjectOutputStream(new FileOutputStream(base_dir + filename, true)) {
-            protected void writeStreamHeader() throws IOException {
-                reset();
-            }
-        };
-    }*/
 
     @POST
     @Path("/receive")
@@ -154,9 +120,8 @@ public class WalletResource extends DefaultSingleRecoverable {
             ObjectOutputStream oos = new ObjectOutputStream(buffer);
             oos.writeObject(new Block(this.height, t));
             oos.close();
-            System.out.println("sendTransactionBFT 1: ");
+
             byte[] reply = counterProxy.invokeOrdered(buffer.toByteArray());
-            System.out.println("sendTransactionBFT 2: ");
 
             if (reply != null) {
                 Block block = (Block) new ObjectInputStream(new ByteArrayInputStream(reply)).readObject();
@@ -219,7 +184,6 @@ public class WalletResource extends DefaultSingleRecoverable {
             Transaction t = b.getTransaction();
             transactions.put(b.getHeight(), t);
             this.height++;
-            //out.writeObject(t);
             String sender = t.getSender();
             String receiver = t.getReceiver();
             double amount = t.getAmount();
