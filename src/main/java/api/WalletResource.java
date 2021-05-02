@@ -1,6 +1,7 @@
 package api;
 
 import java.io.*;
+import java.nio.ByteBuffer;
 import java.security.*;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
@@ -140,6 +141,12 @@ public class WalletResource extends DefaultSingleRecoverable {
             Signature eng;
             eng = TOMUtil.getSigEngine();
             eng.initSign(replica.getReplicaContext().getStaticConfiguration().getPrivateKey());
+
+            ByteBuffer b = ByteBuffer.allocate(4);
+            b.putInt(clientID);
+            // updates signature with clientID info, so other replicas can verify that messages are authentic
+            eng.update(b.array());
+
             signature = eng.sign();
 
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
@@ -214,6 +221,7 @@ public class WalletResource extends DefaultSingleRecoverable {
 
             eng = Signature.getInstance("SHA256withECDSA", "BC");
             Base64.Decoder b64 = Base64.getDecoder();
+            // gets public key of clientID that we received message, only the real server can have the private key to create a valid signature
             byte[] encodedPublicKey = b64.decode(repPubKeys[clientID]);
 
             X509EncodedKeySpec spec = new X509EncodedKeySpec(encodedPublicKey);
@@ -221,7 +229,11 @@ public class WalletResource extends DefaultSingleRecoverable {
             System.out.println(kf.generatePublic(spec));
             eng.initVerify(kf.generatePublic(spec));
 
-            //eng.update(request);
+            ByteBuffer bf = ByteBuffer.allocate(4);
+            bf.putInt(clientID);
+            // updates signature with clientID info, so we can verify
+            eng.update(bf.array());
+
             if (!eng.verify(signature)) {
                 System.out.println("Client sent invalid signature!");
                 System.exit(0);
