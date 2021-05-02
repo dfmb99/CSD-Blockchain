@@ -3,9 +3,6 @@ package api;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.security.*;
-import java.security.cert.CertificateException;
-import java.security.cert.CertificateFactory;
-import java.security.spec.EncodedKeySpec;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.*;
@@ -35,11 +32,6 @@ import data.Transaction;
 @Path("/wallet")
 public class WalletResource extends DefaultSingleRecoverable {
 
-    public static String pubKey_0 = "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEZ1khs6W4EA0r7JrhWNQAM79skNT1dDtfxO1smXmYBVl8PxdlWqMnE3kDgbTyX4ZqGEf5dKILDLzQbJVgiOmuow==";
-    public static String pubKey_1 = "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEwHVs6M04HtYukdIfXyHQh/Ab9CVtWvPSI8QOFhrzPak2WKdPGNe4ShsqqdWakmMAgk4q+8dFianPfrzLWPky3Q==";
-    public static String pubKey_2 = "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEH+EJqewBoZoKSGaooynw6C6E+ONgvyAeXRd1x2uzQZMK9Tdj1ut3XGI/jm38MTxLlv95Yw0Fn5SrazjiH20XQA==";
-    public static String pubKey_3 = "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEdIFueJ3KCYkdnfifV2odkaiHl1mFSPfXG/3DFHfVp20Cng0Pe6yoxg7BQ6YlJDI65YLSq6njmxNG0lGp4DJfpQ==";
-
     public static String[] repPubKeys = new String[]{
             "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEZ1khs6W4EA0r7JrhWNQAM79skNT1dDtfxO1smXmYBVl8PxdlWqMnE3kDgbTyX4ZqGEf5dKILDLzQbJVgiOmuow==",
             "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEwHVs6M04HtYukdIfXyHQh/Ab9CVtWvPSI8QOFhrzPak2WKdPGNe4ShsqqdWakmMAgk4q+8dFianPfrzLWPky3Q==",
@@ -47,7 +39,7 @@ public class WalletResource extends DefaultSingleRecoverable {
             "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEdIFueJ3KCYkdnfifV2odkaiHl1mFSPfXG/3DFHfVp20Cng0Pe6yoxg7BQ6YlJDI65YLSq6njmxNG0lGp4DJfpQ=="};
 
     private Map<String, Double> userBalances;
-    private Map<Long, Transaction> transactions;
+    private Map<Long, Block> blocks;
     private final ServiceProxy proxy;
     private long height;
     private int clientID;
@@ -58,8 +50,8 @@ public class WalletResource extends DefaultSingleRecoverable {
         this.proxy = new ServiceProxy(processID);
         this.clientID = id;
 
-        if ( this.transactions == null ) {
-            this.transactions = new TreeMap<>();
+        if ( this.blocks == null ) {
+            this.blocks = new TreeMap<>();
             this.userBalances = new TreeMap<>();
             this.height = 0;
         }
@@ -118,17 +110,17 @@ public class WalletResource extends DefaultSingleRecoverable {
     @GET
     @Path("/allTransactions")
     @Produces(MediaType.APPLICATION_JSON)
-    public Transaction[] getTransactionsData() {
-        return transactions.values().toArray(new Transaction[0]);
+    public Block[] getTransactionsData() {
+        return blocks.values().toArray(new Block[0]);
     }
 
     @GET
     @Path("/transactions/{addr}")
     @Produces(MediaType.APPLICATION_JSON)
-    public Transaction[] getTransactionsOf(@PathParam("addr") String addr) {
-        System.out.println(transactions.values().size());
-        return transactions.values().stream().filter(t -> t.getReceiver().equals(addr) || (t.getSender() != null && t.getSender().equals(addr)))
-                .toArray(Transaction[]::new);
+    public Block[] getTransactionsOf(@PathParam("addr") String addr) {
+        System.out.println(blocks.values().size());
+        return blocks.values().stream().filter(t -> t.getTransaction().getReceiver().equals(addr) || (t.getTransaction().getSender() != null && t.getTransaction().getSender().equals(addr)))
+                .toArray(Block[]::new);
     }
 
 
@@ -137,7 +129,7 @@ public class WalletResource extends DefaultSingleRecoverable {
      */
     private void sendTransactionBFT(Transaction t) {
         try {
-            byte[] signature = new byte[0];
+            byte[] signature;
             Signature eng;
             eng = TOMUtil.getSigEngine();
             eng.initSign(replica.getReplicaContext().getStaticConfiguration().getPrivateKey());
@@ -185,7 +177,8 @@ public class WalletResource extends DefaultSingleRecoverable {
      */
     private void updateAccountBalances() {
         // Sync transaction list and updates every account balance in memory
-        for (Transaction t : transactions.values()) {
+        for (Block b : blocks.values()) {
+            Transaction t = b.getTransaction();
             String receiver = t.getReceiver();
             String sender = t.getSender();
             double amount = t.getAmount();
@@ -202,7 +195,7 @@ public class WalletResource extends DefaultSingleRecoverable {
         try {
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
             ObjectOutputStream oos = new ObjectOutputStream(buffer);
-            oos.writeObject(this.transactions);
+            oos.writeObject(this.blocks);
             oos.close();
             return buffer.toByteArray();
         } catch (IOException ex) {
@@ -240,7 +233,7 @@ public class WalletResource extends DefaultSingleRecoverable {
             }
 
             Transaction t = b.getTransaction();
-            transactions.put(b.getHeight(), t);
+            blocks.put(b.getHeight(), b);
             this.height++;
             String sender = t.getSender();
             String receiver = t.getReceiver();
@@ -274,7 +267,7 @@ public class WalletResource extends DefaultSingleRecoverable {
     @SuppressWarnings("unchecked")
     @Override
     public void installSnapshot(byte[] state) {
-       this.transactions = new TreeMap<>();
+       this.blocks = new TreeMap<>();
        this.userBalances = new TreeMap<>();
        this.height = 0;
     }
@@ -284,7 +277,7 @@ public class WalletResource extends DefaultSingleRecoverable {
         try {
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
             ObjectOutput o = new ObjectOutputStream(bos);
-            o.writeObject(this.transactions);
+            o.writeObject(this.blocks);
             o.flush();
             bos.flush();
             o.close();
