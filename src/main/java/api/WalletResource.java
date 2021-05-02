@@ -118,7 +118,6 @@ public class WalletResource extends DefaultSingleRecoverable {
     @Path("/transactions/{addr}")
     @Produces(MediaType.APPLICATION_JSON)
     public Block[] getTransactionsOf(@PathParam("addr") String addr) {
-        System.out.println(blocks.values().size());
         return blocks.values().stream().filter(t -> t.getTransaction().getReceiver().equals(addr) || (t.getTransaction().getSender() != null && t.getTransaction().getSender().equals(addr)))
                 .toArray(Block[]::new);
     }
@@ -134,27 +133,36 @@ public class WalletResource extends DefaultSingleRecoverable {
             eng = TOMUtil.getSigEngine();
             eng.initSign(replica.getReplicaContext().getStaticConfiguration().getPrivateKey());
 
+            // updates signature with transaction info, clientID and block height, so other replicas can verify that messages are authentic
             ByteBuffer b = ByteBuffer.allocate(4);
             b.putInt(clientID);
-            // updates signature with clientID info, so other replicas can verify that messages are authentic
             eng.update(b.array());
+
+            b = ByteBuffer.allocate(8);
+            b.putLong(this.height);
+            eng.update(b.array());
+
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            ObjectOutputStream oos = new ObjectOutputStream(bos);
+            oos.writeObject(t);
+            oos.flush();
+
+            eng.update(bos.toByteArray());
 
             signature = eng.sign();
 
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            ObjectOutputStream oos = new ObjectOutputStream(buffer);
-            oos.writeObject(new Block(signature, clientID, this.height, t));
+            oos = new ObjectOutputStream(buffer);
+            Block block_sent = new Block(signature, clientID, this.height, t);
+            oos.writeObject(block_sent);
             oos.close();
 
             byte[] reply = proxy.invokeOrdered(buffer.toByteArray());
 
-            if (reply != null) {
-                Block block = (Block) new ObjectInputStream(new ByteArrayInputStream(reply)).readObject();
-                // TODO
-            } else {
-                System.out.println(", ERROR! Exiting.");
+            if (reply == null) {
+                System.out.println("ERROR! No reply received!");
             }
-        } catch (IOException | NumberFormatException | ClassNotFoundException | NoSuchAlgorithmException | InvalidKeyException | SignatureException e) {
+        } catch (IOException | NumberFormatException | NoSuchAlgorithmException | InvalidKeyException | SignatureException e) {
             e.printStackTrace();
             proxy.close();
         }
@@ -219,17 +227,25 @@ public class WalletResource extends DefaultSingleRecoverable {
 
             X509EncodedKeySpec spec = new X509EncodedKeySpec(encodedPublicKey);
             KeyFactory kf = KeyFactory.getInstance ("ECDSA", "BC");
-            System.out.println(kf.generatePublic(spec));
             eng.initVerify(kf.generatePublic(spec));
 
+            // updates signature with transaction info, clientID and block height, so we can verify that message received is authentic
             ByteBuffer bf = ByteBuffer.allocate(4);
             bf.putInt(clientID);
-            // updates signature with clientID info, so we can verify
             eng.update(bf.array());
+
+            bf = ByteBuffer.allocate(8);
+            bf.putLong(b.getHeight());
+            eng.update(bf.array());
+
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            ObjectOutputStream oos = new ObjectOutputStream(bos);
+            oos.writeObject(b.getTransaction());
+            oos.flush();
+            eng.update(bos.toByteArray());
 
             if (!eng.verify(signature)) {
                 System.out.println("Client sent invalid signature!");
-                System.exit(0);
             }
 
             Transaction t = b.getTransaction();
@@ -244,7 +260,7 @@ public class WalletResource extends DefaultSingleRecoverable {
             userBalances.merge(receiver, amount, Double::sum);
 
             ByteArrayOutputStream buffer1 = new ByteArrayOutputStream();
-            ObjectOutputStream oos = new ObjectOutputStream(buffer1);
+            oos = new ObjectOutputStream(buffer1);
             oos.writeObject(b);
             oos.close();
             return buffer1.toByteArray();
