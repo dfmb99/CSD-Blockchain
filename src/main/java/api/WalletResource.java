@@ -1,8 +1,13 @@
 package api;
 
 import java.io.*;
+import java.security.*;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.spec.EncodedKeySpec;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import javax.inject.Singleton;
 import javax.ws.rs.Consumes;
@@ -19,6 +24,7 @@ import bftsmart.tom.MessageContext;
 import bftsmart.tom.ServiceProxy;
 import bftsmart.tom.ServiceReplica;
 import bftsmart.tom.server.defaultservices.DefaultSingleRecoverable;
+import bftsmart.tom.util.TOMUtil;
 import data.Block;
 import data.ObtainCoinsParams;
 import data.TransferCoinsParams;
@@ -28,14 +34,28 @@ import data.Transaction;
 @Path("/wallet")
 public class WalletResource extends DefaultSingleRecoverable {
 
+    public static String pubKey_0 = "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEZ1khs6W4EA0r7JrhWNQAM79skNT1dDtfxO1smXmYBVl8PxdlWqMnE3kDgbTyX4ZqGEf5dKILDLzQbJVgiOmuow==";
+    public static String pubKey_1 = "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEwHVs6M04HtYukdIfXyHQh/Ab9CVtWvPSI8QOFhrzPak2WKdPGNe4ShsqqdWakmMAgk4q+8dFianPfrzLWPky3Q==";
+    public static String pubKey_2 = "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEH+EJqewBoZoKSGaooynw6C6E+ONgvyAeXRd1x2uzQZMK9Tdj1ut3XGI/jm38MTxLlv95Yw0Fn5SrazjiH20XQA==";
+    public static String pubKey_3 = "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEdIFueJ3KCYkdnfifV2odkaiHl1mFSPfXG/3DFHfVp20Cng0Pe6yoxg7BQ6YlJDI65YLSq6njmxNG0lGp4DJfpQ==";
+
+    public static String[] repPubKeys = new String[]{
+            "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEZ1khs6W4EA0r7JrhWNQAM79skNT1dDtfxO1smXmYBVl8PxdlWqMnE3kDgbTyX4ZqGEf5dKILDLzQbJVgiOmuow==",
+            "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEwHVs6M04HtYukdIfXyHQh/Ab9CVtWvPSI8QOFhrzPak2WKdPGNe4ShsqqdWakmMAgk4q+8dFianPfrzLWPky3Q==",
+            "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEH+EJqewBoZoKSGaooynw6C6E+ONgvyAeXRd1x2uzQZMK9Tdj1ut3XGI/jm38MTxLlv95Yw0Fn5SrazjiH20XQA==",
+            "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEdIFueJ3KCYkdnfifV2odkaiHl1mFSPfXG/3DFHfVp20Cng0Pe6yoxg7BQ6YlJDI65YLSq6njmxNG0lGp4DJfpQ=="};
+
     private Map<String, Double> userBalances;
     private Map<Long, Transaction> transactions;
-    private final ServiceProxy counterProxy;
+    private final ServiceProxy proxy;
     private long height;
+    private int clientID;
+    private ServiceReplica replica;
 
     public WalletResource(int id, int processID) throws Exception {
-        new ServiceReplica(id, this, this);
-        this.counterProxy = new ServiceProxy(processID);
+        replica = new ServiceReplica(id, this, this);
+        this.proxy = new ServiceProxy(processID);
+        this.clientID = id;
 
         if ( this.transactions == null ) {
             this.transactions = new TreeMap<>();
@@ -116,12 +136,18 @@ public class WalletResource extends DefaultSingleRecoverable {
      */
     private void sendTransactionBFT(Transaction t) {
         try {
+            byte[] signature = new byte[0];
+            Signature eng;
+            eng = TOMUtil.getSigEngine();
+            eng.initSign(replica.getReplicaContext().getStaticConfiguration().getPrivateKey());
+            signature = eng.sign();
+
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
             ObjectOutputStream oos = new ObjectOutputStream(buffer);
-            oos.writeObject(new Block(this.height, t));
+            oos.writeObject(new Block(signature, clientID, this.height, t));
             oos.close();
 
-            byte[] reply = counterProxy.invokeOrdered(buffer.toByteArray());
+            byte[] reply = proxy.invokeOrdered(buffer.toByteArray());
 
             if (reply != null) {
                 Block block = (Block) new ObjectInputStream(new ByteArrayInputStream(reply)).readObject();
@@ -129,8 +155,9 @@ public class WalletResource extends DefaultSingleRecoverable {
             } else {
                 System.out.println(", ERROR! Exiting.");
             }
-        } catch (IOException | NumberFormatException | ClassNotFoundException e) {
-            counterProxy.close();
+        } catch (IOException | NumberFormatException | ClassNotFoundException | NoSuchAlgorithmException | InvalidKeyException | SignatureException e) {
+            e.printStackTrace();
+            proxy.close();
         }
 
     }
@@ -181,6 +208,25 @@ public class WalletResource extends DefaultSingleRecoverable {
     public byte[] appExecuteOrdered(byte[] command, MessageContext msgCtx) {
         try {
             Block b = (Block) new ObjectInputStream(new ByteArrayInputStream(command)).readObject();
+            byte[] signature = b.getSignature();
+            int clientID = b.getClientID();
+            Signature eng;
+
+            eng = Signature.getInstance("SHA256withECDSA", "BC");
+            Base64.Decoder b64 = Base64.getDecoder();
+            byte[] encodedPublicKey = b64.decode(repPubKeys[clientID]);
+
+            X509EncodedKeySpec spec = new X509EncodedKeySpec(encodedPublicKey);
+            KeyFactory kf = KeyFactory.getInstance ("ECDSA", "BC");
+            System.out.println(kf.generatePublic(spec));
+            eng.initVerify(kf.generatePublic(spec));
+
+            //eng.update(request);
+            if (!eng.verify(signature)) {
+                System.out.println("Client sent invalid signature!");
+                System.exit(0);
+            }
+
             Transaction t = b.getTransaction();
             transactions.put(b.getHeight(), t);
             this.height++;
@@ -192,12 +238,13 @@ public class WalletResource extends DefaultSingleRecoverable {
             }
             userBalances.merge(receiver, amount, Double::sum);
 
-            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            ObjectOutputStream oos = new ObjectOutputStream(buffer);
+            ByteArrayOutputStream buffer1 = new ByteArrayOutputStream();
+            ObjectOutputStream oos = new ObjectOutputStream(buffer1);
             oos.writeObject(b);
             oos.close();
-            return buffer.toByteArray();
-        } catch (IOException | ClassNotFoundException ex) {
+            return buffer1.toByteArray();
+        } catch (IOException | ClassNotFoundException | NoSuchAlgorithmException | InvalidKeyException | SignatureException | NoSuchProviderException | InvalidKeySpecException ex) {
+            ex.printStackTrace();
             System.err.println("Invalid request received!");
             return new byte[0];
         }
