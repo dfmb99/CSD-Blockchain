@@ -53,15 +53,15 @@ public class Client {
                     scanner.nextLine();
                     transferCoins(ip, port, new TransferCoinsParams(sender, rec, amt));
                     break;
-                case "AllTransactions":
+                case "allTransactions":
                     getAllTransactions(ip, port);
                     break;
-                case "getTransactions":
+                case "getTransactionsOf":
                     System.out.print("Address: ");
                     addr = scanner.nextLine();
                     getTransactionsOf(ip, port, addr);
                     break;
-                case "getBalance":
+                case "getBalanceOf":
                     System.out.print("Address: ");
                     addr = scanner.nextLine();
                     getBalanceOf(ip, port, addr);
@@ -69,9 +69,9 @@ public class Client {
                 case "help":
                     System.out.println("obtainCoins - To receive coins to an account");
                     System.out.println("transferCoins - Transfer coins from an account to other");
-                    System.out.println("AllTransactions - Lists all transactions recorded on the ledger");
-                    System.out.println("getTransactions - Lists all transactions of an account");
-                    System.out.println("getBalance - Gets current balance of an account");
+                    System.out.println("allTransactions - Lists all transactions recorded on the ledger");
+                    System.out.println("getTransactionsOf - Lists all transactions of an account");
+                    System.out.println("getBalanceOf - Gets current balance of an account");
                     System.out.println("exit - Exits client");
                     break;
                 case "exit":
