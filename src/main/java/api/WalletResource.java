@@ -38,14 +38,15 @@ public class WalletResource extends DefaultSingleRecoverable {
             "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEH+EJqewBoZoKSGaooynw6C6E+ONgvyAeXRd1x2uzQZMK9Tdj1ut3XGI/jm38MTxLlv95Yw0Fn5SrazjiH20XQA==",
             "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEdIFueJ3KCYkdnfifV2odkaiHl1mFSPfXG/3DFHfVp20Cng0Pe6yoxg7BQ6YlJDI65YLSq6njmxNG0lGp4DJfpQ=="};
 
+    // TODO: Save data to disk instead of memory, data can get too big
     private Map<String, Double> userBalances;
     private Map<Long, Block> blocks;
     private final ServiceProxy proxy;
     private long height;
-    private int clientID;
-    private ServiceReplica replica;
+    private final int clientID;
+    private final ServiceReplica replica;
 
-    public WalletResource(int id, int processID) throws Exception {
+    public WalletResource(int id, int processID) {
         Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
         replica = new ServiceReplica(id, this, this);
         this.proxy = new ServiceProxy(processID);
@@ -62,7 +63,7 @@ public class WalletResource extends DefaultSingleRecoverable {
     @Path("/receive")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.TEXT_PLAIN)
-    public double obtainCoins(ObtainCoinsParams p) throws IOException, InterruptedException {
+    public void obtainCoins(ObtainCoinsParams p) {
         if (!p.isDataValid()) {
             throw new WebApplicationException(Status.BAD_REQUEST);
         }
@@ -73,14 +74,13 @@ public class WalletResource extends DefaultSingleRecoverable {
         synchronized (this) {
             this.sendTransactionBFT(t);
         }
-        return userBalances.get(addr);
     }
 
     @POST
     @Path("/send")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    public void transferCoins(TransferCoinsParams p) throws IOException {
+    public void transferCoins(TransferCoinsParams p) {
         if (!p.isDataValid()) {
             throw new WebApplicationException(Status.BAD_REQUEST);
         }
@@ -181,24 +181,6 @@ public class WalletResource extends DefaultSingleRecoverable {
         return currBalance != null && currBalance >= amount;
     }
 
-    /**
-     * Updates account balances based on transactions data
-     */
-    private void updateAccountBalances() {
-        // Sync transaction list and updates every account balance in memory
-        for (Block b : blocks.values()) {
-            Transaction t = b.getTransaction();
-            String receiver = t.getReceiver();
-            String sender = t.getSender();
-            double amount = t.getAmount();
-
-            if (sender != null) {
-                userBalances.put(sender, userBalances.get(sender) - amount);
-            }
-            userBalances.merge(receiver, amount, Double::sum);
-        }
-    }
-
     @Override
     public byte[] appExecuteUnordered(byte[] command, MessageContext msgCtx) {
         try {
@@ -281,7 +263,6 @@ public class WalletResource extends DefaultSingleRecoverable {
     }
 
 
-    @SuppressWarnings("unchecked")
     @Override
     public void installSnapshot(byte[] state) {
        this.blocks = new TreeMap<>();

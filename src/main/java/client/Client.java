@@ -7,7 +7,6 @@ import data.TransferCoinsParams;
 import org.glassfish.jersey.client.ClientConfig;
 import org.glassfish.jersey.client.ClientProperties;
 
-import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.client.ClientBuilder;
 import javax.ws.rs.client.Entity;
 import javax.ws.rs.client.WebTarget;
@@ -40,9 +39,9 @@ public class Client {
                     System.out.print("Address to receive coins: ");
                     String addr = scanner.nextLine();
                     System.out.print("Amount: ");
-                    int amnt = scanner.nextInt();
+                    int amt = scanner.nextInt();
                     scanner.nextLine();
-                    System.out.println(obtainCoins(ip, port, new ObtainCoinsParams(addr, amnt)));
+                    obtainCoins(ip, port, new ObtainCoinsParams(addr, amt));
                     break;
                 case "transferCoins":
                     System.out.print("Sender address: ");
@@ -50,28 +49,22 @@ public class Client {
                     System.out.print("Receiver address: ");
                     String rec = scanner.nextLine();
                     System.out.print("Amount: ");
-                    amnt = scanner.nextInt();
+                    amt = scanner.nextInt();
                     scanner.nextLine();
-                    transferCoins(ip, port, new TransferCoinsParams(sender, rec, amnt));
+                    transferCoins(ip, port, new TransferCoinsParams(sender, rec, amt));
                     break;
                 case "AllTransactions":
-                    List<Block> res = getAllTransactions(ip, port);
-                    for(Block b: res) {
-                        b.getTransaction().printTransactionData();
-                    }
+                    getAllTransactions(ip, port);
                     break;
                 case "getTransactions":
                     System.out.print("Address: ");
                     addr = scanner.nextLine();
-                    res = getTransactionsOf(ip, port, addr);
-                    for(Block b: res) {
-                        b.getTransaction().printTransactionData();
-                    }
+                    getTransactionsOf(ip, port, addr);
                     break;
                 case "getBalance":
                     System.out.print("Address: ");
                     addr = scanner.nextLine();
-                    System.out.println(getBalanceOf(ip, port, addr));
+                    getBalanceOf(ip, port, addr);
                     break;
                 case "help":
                     System.out.println("obtainCoins - To receive coins to an account");
@@ -91,12 +84,12 @@ public class Client {
         }
     }
 
-    private static double obtainCoins(String ip, int port, ObtainCoinsParams p) {
+    private static void obtainCoins(String ip, int port, ObtainCoinsParams p) {
         ClientConfig config = new ClientConfig();
         //How much time until timeout on opening the TCP connection to the server
-        config.property(ClientProperties.CONNECT_TIMEOUT, 3000);
+        config.property(ClientProperties.CONNECT_TIMEOUT, 10000);
         //How much time to wait for the reply of the server after sending the request
-        config.property(ClientProperties.READ_TIMEOUT, 3000);
+        config.property(ClientProperties.READ_TIMEOUT, 5000);
         javax.ws.rs.client.Client client = ClientBuilder.newClient(config);
         WebTarget target;
 
@@ -104,19 +97,20 @@ public class Client {
         Response r = target.request()
                 .post(Entity.entity(gson.toJson(p), MediaType.APPLICATION_JSON));
 
-        if (r.getStatus() == Response.Status.OK.getStatusCode() && r.hasEntity()) {
-            return r.readEntity(Double.class);
+        int status = r.getStatus();
+        if (status == Response.Status.NO_CONTENT.getStatusCode()) {
+            System.out.println("Request successful!");
         } else {
-            throw new WebApplicationException(r.getStatus());
+            System.out.println("Error: " + status);
         }
     }
 
     private static void transferCoins(String ip, int port, TransferCoinsParams p) {
         ClientConfig config = new ClientConfig();
         //How much time until timeout on opening the TCP connection to the server
-        config.property(ClientProperties.CONNECT_TIMEOUT, 3000);
+        config.property(ClientProperties.CONNECT_TIMEOUT, 10000);
         //How much time to wait for the reply of the server after sending the request
-        config.property(ClientProperties.READ_TIMEOUT, 3000);
+        config.property(ClientProperties.READ_TIMEOUT, 5000);
         javax.ws.rs.client.Client client = ClientBuilder.newClient(config);
         WebTarget target;
 
@@ -124,17 +118,20 @@ public class Client {
         Response r = target.request()
                 .post(Entity.entity(gson.toJson(p), MediaType.APPLICATION_JSON));
 
-        if (r.getStatus() != Response.Status.NO_CONTENT.getStatusCode() ) {
-            throw new WebApplicationException(r.getStatus());
+        int status = r.getStatus();
+        if (status == Response.Status.NO_CONTENT.getStatusCode()) {
+            System.out.println("Request successful!");
+        } else {
+            System.out.println("Error: " + status);
         }
     }
 
-    private static double getBalanceOf(String ip, int port, String addr) {
+    private static void getBalanceOf(String ip, int port, String addr) {
         ClientConfig config = new ClientConfig();
         //How much time until timeout on opening the TCP connection to the server
-        config.property(ClientProperties.CONNECT_TIMEOUT, 3000);
+        config.property(ClientProperties.CONNECT_TIMEOUT, 10000);
         //How much time to wait for the reply of the server after sending the request
-        config.property(ClientProperties.READ_TIMEOUT, 3000);
+        config.property(ClientProperties.READ_TIMEOUT, 5000);
         javax.ws.rs.client.Client client = ClientBuilder.newClient(config);
         WebTarget target;
 
@@ -142,50 +139,53 @@ public class Client {
         Response r = target.request()
                 .get();
 
-        if (r.getStatus() == Response.Status.OK.getStatusCode() && r.hasEntity()) {
-            return r.readEntity(Double.class);
+        int status = r.getStatus();
+        if (status == Response.Status.OK.getStatusCode() && r.hasEntity()) {
+            System.out.println("Response: " + r.readEntity(Double.class));
         } else {
-            throw new WebApplicationException(r.getStatus());
+            System.out.println("Error: " + status);
         }
     }
 
-    private static List<Block> getTransactionsOf(String ip, int port, String addr) {
+    private static void getTransactionsOf(String ip, int port, String addr) {
         ClientConfig config = new ClientConfig();
         //How much time until timeout on opening the TCP connection to the server
-        config.property(ClientProperties.CONNECT_TIMEOUT, 3000);
+        config.property(ClientProperties.CONNECT_TIMEOUT, 10000);
         //How much time to wait for the reply of the server after sending the request
-        config.property(ClientProperties.READ_TIMEOUT, 3000);
+        config.property(ClientProperties.READ_TIMEOUT, 5000);
         javax.ws.rs.client.Client client = ClientBuilder.newClient(config);
         WebTarget target;
 
         target = client.target(String.format("http://%s:%s/rest", ip, port)).path("wallet/transactions/" + addr);
+        getListResponse(target);
+    }
+
+    private static void getListResponse(WebTarget target) {
         Response r = target.request()
                 .get();
 
-        if (r.getStatus() == Response.Status.OK.getStatusCode() && r.hasEntity()) {
-            return r.readEntity(new GenericType<List<Block>>() {});
+        int status = r.getStatus();
+        if (status == Response.Status.OK.getStatusCode() && r.hasEntity()) {
+            System.out.println("Response: ");
+            List<Block> res = r.readEntity(new GenericType<List<Block>>() {});
+            for(Block b: res) {
+                b.getTransaction().printTransactionData();
+            }
         } else {
-            throw new WebApplicationException(r.getStatus());
+            System.out.println("Error: " + status);
         }
     }
 
-    private static List<Block> getAllTransactions(String ip, int port) {
+    private static void getAllTransactions(String ip, int port) {
         ClientConfig config = new ClientConfig();
         //How much time until timeout on opening the TCP connection to the server
-        config.property(ClientProperties.CONNECT_TIMEOUT, 3000);
+        config.property(ClientProperties.CONNECT_TIMEOUT, 10000);
         //How much time to wait for the reply of the server after sending the request
-        config.property(ClientProperties.READ_TIMEOUT, 3000);
+        config.property(ClientProperties.READ_TIMEOUT, 5000);
         javax.ws.rs.client.Client client = ClientBuilder.newClient(config);
         WebTarget target;
 
         target = client.target(String.format("http://%s:%s/rest", ip, port)).path("wallet/allTransactions");
-        Response r = target.request()
-                .get();
-
-        if (r.getStatus() == Response.Status.OK.getStatusCode() && r.hasEntity()) {
-            return r.readEntity(new GenericType<List<Block>>() {});
-        } else {
-            throw new WebApplicationException(r.getStatus());
-        }
+        getListResponse(target);
     }
 }
