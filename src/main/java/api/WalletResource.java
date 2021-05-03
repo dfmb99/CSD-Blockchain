@@ -46,6 +46,7 @@ public class WalletResource extends DefaultSingleRecoverable {
     private ServiceReplica replica;
 
     public WalletResource(int id, int processID) throws Exception {
+        Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
         replica = new ServiceReplica(id, this, this);
         this.proxy = new ServiceProxy(processID);
         this.clientID = id;
