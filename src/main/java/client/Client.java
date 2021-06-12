@@ -3,6 +3,7 @@ package client;
 import com.google.gson.Gson;
 import data.Block;
 import data.ObtainCoinsParams;
+import data.Transaction;
 import data.TransferCoinsParams;
 import org.glassfish.jersey.client.ClientConfig;
 import org.glassfish.jersey.client.ClientProperties;
@@ -36,22 +37,26 @@ public class Client {
             String input = scanner.nextLine();
             switch (input) {
                 case "obtainCoins":
-                    System.out.print("Address to receive coins: ");
+                    System.out.print("Receiver public key: ");
                     String addr = scanner.nextLine();
                     System.out.print("Amount: ");
                     int amt = scanner.nextInt();
                     scanner.nextLine();
-                    obtainCoins(ip, port, new ObtainCoinsParams(addr, amt));
+                    System.out.print("Receiver private Key: ");
+                    String sig = scanner.nextLine();
+                    obtainCoins(ip, port, new ObtainCoinsParams(addr, amt, sig));
                     break;
                 case "transferCoins":
-                    System.out.print("Sender address: ");
+                    System.out.print("Sender public key: ");
                     String sender = scanner.nextLine();
-                    System.out.print("Receiver address: ");
+                    System.out.print("Receiver public key: ");
                     String rec = scanner.nextLine();
                     System.out.print("Amount: ");
                     amt = scanner.nextInt();
                     scanner.nextLine();
-                    transferCoins(ip, port, new TransferCoinsParams(sender, rec, amt));
+                    System.out.print("Sender private Key: ");
+                    sig = scanner.nextLine();
+                    transferCoins(ip, port, new TransferCoinsParams(sender, rec, amt, sig));
                     break;
                 case "allTransactions":
                     getAllTransactions(ip, port);
@@ -66,12 +71,22 @@ public class Client {
                     addr = scanner.nextLine();
                     getBalanceOf(ip, port, addr);
                     break;
+                case "getMemPool":
+                    getMemPool(ip, port);
+                    break;
+                case "mineBlock":
+                    Block b = null;
+                    // TODO: proof of work
+                    mineBlock(ip, port, b);
+                    break;
                 case "help":
                     System.out.println("obtainCoins - To receive coins to an account");
                     System.out.println("transferCoins - Transfer coins from an account to other");
                     System.out.println("allTransactions - Lists all transactions recorded on the ledger");
                     System.out.println("getTransactionsOf - Lists all transactions of an account");
                     System.out.println("getBalanceOf - Gets current balance of an account");
+                    System.out.println("getMemPool - Gets unconfirmed transactions stored on node");
+                    System.out.println("mineBlock - Tries to mine a block (can take a some time)");
                     System.out.println("exit - Exits client");
                     break;
                 case "exit":
@@ -101,7 +116,11 @@ public class Client {
         if (status == Response.Status.NO_CONTENT.getStatusCode()) {
             System.out.println("Request successful!");
         } else {
-            System.out.println("Error: " + status);
+            if (status == Response.Status.FORBIDDEN.getStatusCode()) {
+                System.err.println("Invalid signature!");
+            } else {
+                System.err.println("Invalid transaction data!");
+            }
         }
     }
 
@@ -122,7 +141,11 @@ public class Client {
         if (status == Response.Status.NO_CONTENT.getStatusCode()) {
             System.out.println("Request successful!");
         } else {
-            System.out.println("Error: " + status);
+            if (status == Response.Status.FORBIDDEN.getStatusCode()) {
+                System.err.println("Invalid signature!");
+            } else {
+                System.err.println("Invalid transaction data!");
+            }
         }
     }
 
@@ -143,7 +166,7 @@ public class Client {
         if (status == Response.Status.OK.getStatusCode() && r.hasEntity()) {
             System.out.println("Response: " + r.readEntity(Double.class));
         } else {
-            System.out.println("Error: " + status);
+            System.err.println("Error: " + status);
         }
     }
 
@@ -157,19 +180,40 @@ public class Client {
         WebTarget target;
 
         target = client.target(String.format("http://%s:%s/rest", ip, port)).path("wallet/transactions/" + addr);
-        getListResponse(target);
-    }
-
-    private static void getListResponse(WebTarget target) {
         Response r = target.request()
                 .get();
 
         int status = r.getStatus();
         if (status == Response.Status.OK.getStatusCode() && r.hasEntity()) {
             System.out.println("Response: ");
-            List<Block> res = r.readEntity(new GenericType<List<Block>>() {});
-            for(Block b: res) {
-                b.getTransaction().printTransactionData();
+            Transaction[] txs = r.readEntity(new GenericType<Transaction[]>() {});
+            for(Transaction t: txs) {
+                t.printTransactionData();
+            }
+        } else {
+            System.out.println("Error: " + status);
+        }
+    }
+
+    private static void getMemPool(String ip, int port) {
+        ClientConfig config = new ClientConfig();
+        //How much time until timeout on opening the TCP connection to the server
+        config.property(ClientProperties.CONNECT_TIMEOUT, 10000);
+        //How much time to wait for the reply of the server after sending the request
+        config.property(ClientProperties.READ_TIMEOUT, 5000);
+        javax.ws.rs.client.Client client = ClientBuilder.newClient(config);
+        WebTarget target;
+
+        target = client.target(String.format("http://%s:%s/rest", ip, port)).path("wallet/mempool");
+        Response r = target.request()
+                .get();
+
+        int status = r.getStatus();
+        if (status == Response.Status.OK.getStatusCode() && r.hasEntity()) {
+            System.out.println("Response: ");
+            Transaction[] txs = r.readEntity(new GenericType<Transaction[]>() {});
+            for(Transaction t: txs) {
+                t.printTransactionData();
             }
         } else {
             System.out.println("Error: " + status);
@@ -186,6 +230,39 @@ public class Client {
         WebTarget target;
 
         target = client.target(String.format("http://%s:%s/rest", ip, port)).path("wallet/allTransactions");
-        getListResponse(target);
+        Response r = target.request()
+                .get();
+
+        int status = r.getStatus();
+        if (status == Response.Status.OK.getStatusCode() && r.hasEntity()) {
+            System.out.println("Response: ");
+            Transaction[] txs = r.readEntity(new GenericType<Transaction[]>() {});
+            for(Transaction t: txs) {
+                t.printTransactionData();
+            }
+        } else {
+            System.out.println("Error: " + status);
+        }
+    }
+
+    private static void mineBlock(String ip, int port, Block b) {
+        ClientConfig config = new ClientConfig();
+        //How much time until timeout on opening the TCP connection to the server
+        config.property(ClientProperties.CONNECT_TIMEOUT, 10000);
+        //How much time to wait for the reply of the server after sending the request
+        config.property(ClientProperties.READ_TIMEOUT, 5000);
+        javax.ws.rs.client.Client client = ClientBuilder.newClient(config);
+        WebTarget target;
+
+        target = client.target(String.format("http://%s:%s/rest", ip, port)).path("wallet/mineBlock");
+        Response r = target.request()
+                .post(Entity.entity(gson.toJson(b), MediaType.APPLICATION_JSON));
+
+        int status = r.getStatus();
+        if (status == Response.Status.NO_CONTENT.getStatusCode()) {
+            System.out.println("Request successful!");
+        } else {
+            System.err.println("Invalid block data!");
+        }
     }
 }

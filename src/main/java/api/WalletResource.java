@@ -23,15 +23,13 @@ import bftsmart.tom.ServiceProxy;
 import bftsmart.tom.ServiceReplica;
 import bftsmart.tom.server.defaultservices.DefaultSingleRecoverable;
 import bftsmart.tom.util.TOMUtil;
-import data.Block;
-import data.ObtainCoinsParams;
-import data.TransferCoinsParams;
-import data.Transaction;
+import data.*;
 
 @Singleton
 @Path("/wallet")
 public class WalletResource extends DefaultSingleRecoverable {
 
+    // public keys of the replicas that participate in consensus
     public static String[] repPubKeys = new String[]{
             "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEZ1khs6W4EA0r7JrhWNQAM79skNT1dDtfxO1smXmYBVl8PxdlWqMnE3kDgbTyX4ZqGEf5dKILDLzQbJVgiOmuow==",
             "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEwHVs6M04HtYukdIfXyHQh/Ab9CVtWvPSI8QOFhrzPak2WKdPGNe4ShsqqdWakmMAgk4q+8dFianPfrzLWPky3Q==",
@@ -40,9 +38,12 @@ public class WalletResource extends DefaultSingleRecoverable {
 
     // TODO: Save data to disk instead of memory, data can get too big
     private Map<String, Double> userBalances;
+    // full ledger with confirmed blocks
     private Map<Long, Block> blocks;
+    // list of unconfirmed transactions
+    private List<Transaction> mem_pool;
     private final ServiceProxy proxy;
-    private long height;
+    private long currHeight;
     private final int clientID;
     private final ServiceReplica replica;
 
@@ -52,10 +53,11 @@ public class WalletResource extends DefaultSingleRecoverable {
         this.proxy = new ServiceProxy(processID);
         this.clientID = id;
 
-        if ( this.blocks == null ) {
+        if (this.blocks == null) {
             this.blocks = new TreeMap<>();
+            this.mem_pool = new ArrayList<>();
             this.userBalances = new TreeMap<>();
-            this.height = 0;
+            this.currHeight = -1;
         }
     }
 
@@ -67,10 +69,10 @@ public class WalletResource extends DefaultSingleRecoverable {
         if (!p.isDataValid()) {
             throw new WebApplicationException(Status.BAD_REQUEST);
         }
-
-        String addr = p.getAddress();
-        double amount = p.getAmount();
-        Transaction t = new Transaction(null, addr, amount);
+        Transaction t = new Transaction(null, p.getAddress(), p.getAmount(), p.getSignature());
+        if (!t.isTransactionValid()) {
+            throw new WebApplicationException(Status.FORBIDDEN);
+        }
         synchronized (this) {
             this.sendTransactionBFT(t);
         }
@@ -86,12 +88,14 @@ public class WalletResource extends DefaultSingleRecoverable {
         }
 
         String sender = p.getSender();
-        String receiver = p.getReceiver();
         Double amount = p.getAmount();
         if (!hasSpendableBalance(sender, amount)) {
+            throw new WebApplicationException(Status.BAD_REQUEST);
+        }
+        Transaction t = new Transaction(sender, p.getReceiver(), amount, p.getSignature());
+        if (!t.isTransactionValid()) {
             throw new WebApplicationException(Status.FORBIDDEN);
         }
-        Transaction t = new Transaction(sender, receiver, amount);
         synchronized (this) {
             this.sendTransactionBFT(t);
         }
@@ -111,18 +115,73 @@ public class WalletResource extends DefaultSingleRecoverable {
     @GET
     @Path("/allTransactions")
     @Produces(MediaType.APPLICATION_JSON)
-    public Block[] getTransactionsData() {
-        return blocks.values().toArray(new Block[0]);
+    public Transaction[] getAllTransactions() {
+        Block[] ledger = this.blocks.values().toArray(new Block[0]);
+        List<Transaction> txs = new ArrayList<>();
+        for (Block b: ledger) {
+            txs.addAll(Arrays.asList(b.getTransactions()));
+        }
+        return txs.toArray(new Transaction[0]);
     }
 
     @GET
     @Path("/transactions/{addr}")
     @Produces(MediaType.APPLICATION_JSON)
-    public Block[] getTransactionsOf(@PathParam("addr") String addr) {
-        return blocks.values().stream().filter(t -> t.getTransaction().getReceiver().equals(addr) || (t.getTransaction().getSender() != null && t.getTransaction().getSender().equals(addr)))
-                .toArray(Block[]::new);
+    public Transaction[] getTransactionsOf(@PathParam("addr") String addr) {
+        Block[] ledger = this.blocks.values().toArray(new Block[0]);
+        List<Transaction> txs = new ArrayList<>();
+        for (Block b: ledger) {
+            for (Transaction t: b.getTransactions()) {
+                if (t.getReceiver().equals(addr) || (t.getSender() != null && t.getSender().equals(addr))) {
+                    txs.add(t);
+                }
+            }
+        }
+        return txs.toArray(new Transaction[0]);
     }
 
+    @GET
+    @Path("/lastBlock")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Block getLastBlock() {
+        return this.blocks.get(this.currHeight);
+    }
+
+    @GET
+    @Path("/mempool")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Transaction[] getUnconfirmedTransactions() {
+        return this.mem_pool.toArray(new Transaction[0]);
+    }
+
+    @POST
+    @Path("/mineBlock")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.TEXT_PLAIN)
+    public void mineBlock(Block b) {
+        if (!b.isBlockValid()) {
+            throw new WebApplicationException(Status.FORBIDDEN);
+        }
+        synchronized (this) {
+            this.sendBlockBFT(b);
+        }
+    }
+
+    @POST
+    @Path("/sendSmartContract")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.TEXT_PLAIN)
+    public void transferCoinsSmartContract(Block b) {
+        // TODO
+    }
+
+    @POST
+    @Path("/sendPrivate")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.TEXT_PLAIN)
+    public void transferCoinsPrivate() {
+        // TODO
+    }
 
     /**
      * Broadcast transaction to other nodes
@@ -134,13 +193,9 @@ public class WalletResource extends DefaultSingleRecoverable {
             eng = TOMUtil.getSigEngine();
             eng.initSign(replica.getReplicaContext().getStaticConfiguration().getPrivateKey());
 
-            // updates signature with transaction info, clientID and block height, so other replicas can verify that messages are authentic
+            // updates signature with clientID and block, so other replicas can verify that messages are authentic
             ByteBuffer b = ByteBuffer.allocate(4);
             b.putInt(clientID);
-            eng.update(b.array());
-
-            b = ByteBuffer.allocate(8);
-            b.putLong(this.height);
             eng.update(b.array());
 
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
@@ -154,8 +209,48 @@ public class WalletResource extends DefaultSingleRecoverable {
 
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
             oos = new ObjectOutputStream(buffer);
-            Block block_sent = new Block(signature, clientID, this.height, t);
-            oos.writeObject(block_sent);
+            oos.writeObject(new ConsensusData(clientID, t, signature));
+            oos.close();
+
+            byte[] reply = proxy.invokeOrdered(buffer.toByteArray());
+
+            if (reply == null) {
+                System.out.println("ERROR! No reply received!");
+            }
+        } catch (IOException | NumberFormatException | NoSuchAlgorithmException | InvalidKeyException | SignatureException e) {
+            e.printStackTrace();
+            proxy.close();
+        }
+
+    }
+
+    /**
+     * Broadcast block to other nodes
+     */
+    private void sendBlockBFT(Block block) {
+        try {
+            byte[] signature;
+            Signature eng;
+            eng = TOMUtil.getSigEngine();
+            eng.initSign(replica.getReplicaContext().getStaticConfiguration().getPrivateKey());
+
+            // updates signature with clientID and block, so other replicas can verify that messages are authentic
+            ByteBuffer b = ByteBuffer.allocate(4);
+            b.putInt(clientID);
+            eng.update(b.array());
+
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            ObjectOutputStream oos = new ObjectOutputStream(bos);
+            oos.writeObject(block);
+            oos.flush();
+
+            eng.update(bos.toByteArray());
+
+            signature = eng.sign();
+
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            oos = new ObjectOutputStream(buffer);
+            oos.writeObject(new ConsensusData(clientID, block, signature));
             oos.close();
 
             byte[] reply = proxy.invokeOrdered(buffer.toByteArray());
@@ -181,26 +276,65 @@ public class WalletResource extends DefaultSingleRecoverable {
         return currBalance != null && currBalance >= amount;
     }
 
+    private void verifyRecBlock(Block b) {
+        Transaction[] txs = b.getTransactions();
+        if (b.isBlockValid() && allTransactionsValid(this.userBalances, txs)) {
+            for (Transaction t : txs) {
+                String sender = t.getSender();
+                String receiver = t.getReceiver();
+                double amount = t.getAmount();
+                if (sender != null) {
+                    userBalances.put(sender, userBalances.get(sender) - amount);
+                }
+                userBalances.merge(receiver, amount, Double::sum);
+            }
+            this.blocks.put(b.getHeight(), b);
+            this.currHeight++;
+        } else {
+            System.err.println("Received invalid block!");
+        }
+    }
+
+    public boolean allTransactionsValid(Map<String, Double> bal, Transaction[] txs) {
+        for (Transaction t : txs) {
+            String sender = t.getSender();
+            String receiver = t.getReceiver();
+            double amount = t.getAmount();
+            if (sender != null) {
+                bal.put(sender, userBalances.get(sender) - amount);
+            }
+            bal.merge(receiver, amount, Double::sum);
+
+            if (bal.get(sender) < 0 || bal.get(receiver) < 0) {
+                System.err.println("Rejected block! Found negative balances");
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void verifyRecTransaction(Transaction t) {
+        if (t.isTransactionValid()) {
+            if (this.mem_pool.size() >= 100) {
+                this.mem_pool.remove(0);
+            }
+            this.mem_pool.add(t);
+        } else {
+            System.err.println("Received invalid transaction!");
+        }
+    }
+
     @Override
     public byte[] appExecuteUnordered(byte[] command, MessageContext msgCtx) {
-        try {
-            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            ObjectOutputStream oos = new ObjectOutputStream(buffer);
-            oos.writeObject(this.blocks);
-            oos.close();
-            return buffer.toByteArray();
-        } catch (IOException ex) {
-            System.err.println("Invalid request received!");
-            return new byte[0];
-        }
+        return null;
     }
 
     @Override
     public byte[] appExecuteOrdered(byte[] command, MessageContext msgCtx) {
         try {
-            Block b = (Block) new ObjectInputStream(new ByteArrayInputStream(command)).readObject();
-            byte[] signature = b.getSignature();
-            int clientID = b.getClientID();
+            ConsensusData d = (ConsensusData) new ObjectInputStream(new ByteArrayInputStream(command)).readObject();
+            byte[] signature = d.getSignature();
+            int clientID = d.getClientID();
             Signature eng;
 
             eng = Signature.getInstance("SHA256withECDSA", "BC");
@@ -209,21 +343,20 @@ public class WalletResource extends DefaultSingleRecoverable {
             byte[] encodedPublicKey = b64.decode(repPubKeys[clientID]);
 
             X509EncodedKeySpec spec = new X509EncodedKeySpec(encodedPublicKey);
-            KeyFactory kf = KeyFactory.getInstance ("ECDSA", "BC");
+            KeyFactory kf = KeyFactory.getInstance("ECDSA", "BC");
             eng.initVerify(kf.generatePublic(spec));
 
-            // updates signature with transaction info, clientID and block height, so we can verify that message received is authentic
-            ByteBuffer bf = ByteBuffer.allocate(4);
-            bf.putInt(clientID);
-            eng.update(bf.array());
-
-            bf = ByteBuffer.allocate(8);
-            bf.putLong(b.getHeight());
-            eng.update(bf.array());
+            ByteBuffer b = ByteBuffer.allocate(4);
+            b.putInt(clientID);
+            eng.update(b.array());
 
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
             ObjectOutputStream oos = new ObjectOutputStream(bos);
-            oos.writeObject(b.getTransaction());
+            if (d.hasBlock()) {
+                oos.writeObject(d.getBlock());
+            } else if (d.hasTransaction()) {
+                oos.writeObject(d.getTransaction());
+            }
             oos.flush();
             eng.update(bos.toByteArray());
 
@@ -231,22 +364,17 @@ public class WalletResource extends DefaultSingleRecoverable {
                 System.out.println("Client sent invalid signature!");
             }
 
-            Transaction t = b.getTransaction();
-            blocks.put(b.getHeight(), b);
-            this.height++;
-            String sender = t.getSender();
-            String receiver = t.getReceiver();
-            double amount = t.getAmount();
-            if (sender != null) {
-                userBalances.put(sender, userBalances.get(sender) - amount);
+            if (d.hasBlock()) {
+                verifyRecBlock(d.getBlock());
+            } else if (d.hasTransaction()) {
+                verifyRecTransaction(d.getTransaction());
             }
-            userBalances.merge(receiver, amount, Double::sum);
 
-            ByteArrayOutputStream buffer1 = new ByteArrayOutputStream();
-            oos = new ObjectOutputStream(buffer1);
-            oos.writeObject(b);
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            oos = new ObjectOutputStream(buffer);
+            oos.writeObject(d);
             oos.close();
-            return buffer1.toByteArray();
+            return buffer.toByteArray();
         } catch (IOException | ClassNotFoundException | NoSuchAlgorithmException | InvalidKeyException | SignatureException | NoSuchProviderException | InvalidKeySpecException ex) {
             ex.printStackTrace();
             System.err.println("Invalid request received!");
@@ -254,20 +382,12 @@ public class WalletResource extends DefaultSingleRecoverable {
         }
     }
 
-    public static void main(String[] args) throws Exception {
-        if (args.length < 2) {
-            System.out.println("Use: java WalletResource <id> <processId>");
-            System.exit(-1);
-        }
-        new WalletResource(Integer.parseInt(args[0]), Integer.parseInt(args[1]));
-    }
-
-
     @Override
     public void installSnapshot(byte[] state) {
-       this.blocks = new TreeMap<>();
-       this.userBalances = new TreeMap<>();
-       this.height = 0;
+        this.blocks = new TreeMap<>();
+        this.userBalances = new TreeMap<>();
+        this.mem_pool = new ArrayList<>();
+        this.currHeight = -1;
     }
 
     @Override
@@ -286,6 +406,14 @@ public class WalletResource extends DefaultSingleRecoverable {
                     + ioe.getMessage());
             return "ERROR".getBytes();
         }
+    }
+
+    public static void main(String[] args) throws Exception {
+        if (args.length < 2) {
+            System.out.println("Use: java WalletResource <id> <processId>");
+            System.exit(-1);
+        }
+        new WalletResource(Integer.parseInt(args[0]), Integer.parseInt(args[1]));
     }
 
 }
