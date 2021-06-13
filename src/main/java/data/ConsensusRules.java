@@ -2,6 +2,6 @@ package data;
 
 public class ConsensusRules {
     public static final int MAX_TRANSACTIONS = 100;
-    public static final long DIFFICULTY = 3;
-    public static final double BLOCK_REWARD = 10.0;
+    public static final int DIFFICULTY = 5;
+    public static final long BLOCK_REWARD = 10L;
 }

@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.util.Arrays;
 import com.google.gson.Gson;
+import org.bouncycastle.util.encoders.Hex;
 
 public class Block implements Serializable {
 
@@ -61,9 +62,9 @@ public class Block implements Serializable {
     public boolean isBlockValid() {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            String input = this.previous_hash + this.hash + this.nonce + this.difficulty + this.height + this.timestamp + new Gson().toJson(transactions);
-            byte[] encodedHash = digest.digest(input.getBytes());
-            String hash = new String(encodedHash, StandardCharsets.UTF_8);
+            String input = this.previous_hash + this.nonce + this.difficulty + this.height + this.timestamp + new Gson().toJson(transactions);
+            byte[] encodedHash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            String hash = new String(Hex.encode(encodedHash));
             String z = "";
             for (int i = 0; i < difficulty; i++) {
                 z = z.concat("0");
@@ -78,9 +79,20 @@ public class Block implements Serializable {
                     && this.transactions.length <= ConsensusRules.MAX_TRANSACTIONS
                     && this.difficulty == ConsensusRules.DIFFICULTY
                     && rewards <= ConsensusRules.BLOCK_REWARD;
-        } catch (NoSuchAlgorithmException e) {
+        } catch (Exception e) {
             e.printStackTrace();
             return false;
         }
+    }
+
+    public void printBlockData() {
+        System.out.println(" Previous Hash: " + this.previous_hash +
+                " \n Block hash: " + this.hash +
+                " \n Nonce: " + this.nonce +
+                " \n Difficulty: " + this.difficulty +
+                " \n Height: " + this.height +
+                " \n Timestamp: " + this.timestamp +
+                " \n Transactions: " + new Gson().toJson(this.transactions) +
+                " \n --------");
     }
 }

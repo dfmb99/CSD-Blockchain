@@ -1,7 +1,10 @@
 package api;
 
 import java.io.*;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
@@ -37,7 +40,7 @@ public class WalletResource extends DefaultSingleRecoverable {
             "MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEdIFueJ3KCYkdnfifV2odkaiHl1mFSPfXG/3DFHfVp20Cng0Pe6yoxg7BQ6YlJDI65YLSq6njmxNG0lGp4DJfpQ=="};
 
     // TODO: Save data to disk instead of memory, data can get too big
-    private Map<String, Double> userBalances;
+    private Map<String, Long> userBalances;
     // full ledger with confirmed blocks
     private Map<Long, Block> blocks;
     // list of unconfirmed transactions
@@ -62,23 +65,6 @@ public class WalletResource extends DefaultSingleRecoverable {
     }
 
     @POST
-    @Path("/receive")
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.TEXT_PLAIN)
-    public void obtainCoins(ObtainCoinsParams p) {
-        if (!p.isDataValid()) {
-            throw new WebApplicationException(Status.BAD_REQUEST);
-        }
-        Transaction t = new Transaction(null, p.getAddress(), p.getAmount(), p.getSignature());
-        if (!t.isTransactionValid()) {
-            throw new WebApplicationException(Status.FORBIDDEN);
-        }
-        synchronized (this) {
-            this.sendTransactionBFT(t);
-        }
-    }
-
-    @POST
     @Path("/send")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
@@ -88,11 +74,11 @@ public class WalletResource extends DefaultSingleRecoverable {
         }
 
         String sender = p.getSender();
-        Double amount = p.getAmount();
+        Long amount = p.getAmount();
         if (!hasSpendableBalance(sender, amount)) {
-            throw new WebApplicationException(Status.BAD_REQUEST);
+            throw new WebApplicationException(Status.CONFLICT);
         }
-        Transaction t = new Transaction(sender, p.getReceiver(), amount, p.getSignature());
+        Transaction t = new Transaction(sender, p.getReceiver(), amount, p.getTimestamp(), p.getSignature());
         if (!t.isTransactionValid()) {
             throw new WebApplicationException(Status.FORBIDDEN);
         }
@@ -104,21 +90,31 @@ public class WalletResource extends DefaultSingleRecoverable {
     @GET
     @Path("/{addr}")
     @Produces(MediaType.APPLICATION_JSON)
-    public double getBalanceOf(@PathParam("addr") String addr) {
-        Double balance = userBalances.get(addr);
-        if (balance != null) {
-            return balance;
+    public long getBalanceOf(@PathParam("addr") String addr) {
+        try {
+            if (addr != null) {
+                String decoded_addr = URLDecoder.decode(addr, StandardCharsets.UTF_8);
+                decoded_addr = decoded_addr.replaceAll(" ", "+");
+                Long balance = userBalances.get(decoded_addr);
+                if (balance != null) {
+                    return balance;
+                }
+            }
+        } catch (IllegalArgumentException e) {
+            e.printStackTrace();
+            // invalid address received as parameter
+            return 0L;
         }
-        return 0.0;
+        return 0L;
     }
 
     @GET
     @Path("/allTransactions")
     @Produces(MediaType.APPLICATION_JSON)
-    public Transaction[] getAllTransactions() {
+    public Transaction[] getAllConfirmedTransactions() {
         Block[] ledger = this.blocks.values().toArray(new Block[0]);
         List<Transaction> txs = new ArrayList<>();
-        for (Block b: ledger) {
+        for (Block b : ledger) {
             txs.addAll(Arrays.asList(b.getTransactions()));
         }
         return txs.toArray(new Transaction[0]);
@@ -128,11 +124,21 @@ public class WalletResource extends DefaultSingleRecoverable {
     @Path("/transactions/{addr}")
     @Produces(MediaType.APPLICATION_JSON)
     public Transaction[] getTransactionsOf(@PathParam("addr") String addr) {
+        String decoded_addr;
+        try {
+            decoded_addr = URLDecoder.decode(addr, StandardCharsets.UTF_8);
+            decoded_addr = decoded_addr.replaceAll(" ", "+");
+        } catch (IllegalArgumentException e) {
+            e.printStackTrace();
+            // invalid address received as parameter
+            throw new WebApplicationException(Status.BAD_REQUEST);
+        }
+
         Block[] ledger = this.blocks.values().toArray(new Block[0]);
         List<Transaction> txs = new ArrayList<>();
-        for (Block b: ledger) {
-            for (Transaction t: b.getTransactions()) {
-                if (t.getReceiver().equals(addr) || (t.getSender() != null && t.getSender().equals(addr))) {
+        for (Block b : ledger) {
+            for (Transaction t : b.getTransactions()) {
+                if (t.getReceiver().equals(addr) || (t.getSender() != null && t.getSender().equals(decoded_addr))) {
                     txs.add(t);
                 }
             }
@@ -215,7 +221,7 @@ public class WalletResource extends DefaultSingleRecoverable {
             byte[] reply = proxy.invokeOrdered(buffer.toByteArray());
 
             if (reply == null) {
-                System.out.println("ERROR! No reply received!");
+                System.err.println("ERROR! No reply received!");
             }
         } catch (IOException | NumberFormatException | NoSuchAlgorithmException | InvalidKeyException | SignatureException e) {
             e.printStackTrace();
@@ -243,7 +249,6 @@ public class WalletResource extends DefaultSingleRecoverable {
             ObjectOutputStream oos = new ObjectOutputStream(bos);
             oos.writeObject(block);
             oos.flush();
-
             eng.update(bos.toByteArray());
 
             signature = eng.sign();
@@ -256,7 +261,7 @@ public class WalletResource extends DefaultSingleRecoverable {
             byte[] reply = proxy.invokeOrdered(buffer.toByteArray());
 
             if (reply == null) {
-                System.out.println("ERROR! No reply received!");
+                System.err.println("ERROR! No reply received!");
             }
         } catch (IOException | NumberFormatException | NoSuchAlgorithmException | InvalidKeyException | SignatureException e) {
             e.printStackTrace();
@@ -271,22 +276,24 @@ public class WalletResource extends DefaultSingleRecoverable {
      * @param address - address to check balance
      * @param amount  - minimum amount of coins address must hold to return true
      */
-    private boolean hasSpendableBalance(String address, double amount) {
-        Double currBalance = userBalances.get(address);
+    private boolean hasSpendableBalance(String address, long amount) {
+        Long currBalance = userBalances.get(address);
         return currBalance != null && currBalance >= amount;
     }
 
     private void verifyRecBlock(Block b) {
         Transaction[] txs = b.getTransactions();
-        if (b.isBlockValid() && allTransactionsValid(this.userBalances, txs)) {
+        boolean prev_hash = currHeight < 0 || b.getPrevious_hash().equals(this.blocks.get(currHeight).getHash());
+        if (b.isBlockValid() && allTransactionsValid(new TreeMap<>(this.userBalances), txs) && b.getHeight() == this.currHeight + 1 && prev_hash) {
             for (Transaction t : txs) {
                 String sender = t.getSender();
                 String receiver = t.getReceiver();
-                double amount = t.getAmount();
+                long amount = t.getAmount();
                 if (sender != null) {
                     userBalances.put(sender, userBalances.get(sender) - amount);
                 }
-                userBalances.merge(receiver, amount, Double::sum);
+                userBalances.merge(receiver, amount, Long::sum);
+                this.mem_pool.removeIf(o -> o.getSignature().equals(t.getSignature()));
             }
             this.blocks.put(b.getHeight(), b);
             this.currHeight++;
@@ -295,17 +302,28 @@ public class WalletResource extends DefaultSingleRecoverable {
         }
     }
 
-    public boolean allTransactionsValid(Map<String, Double> bal, Transaction[] txs) {
-        for (Transaction t : txs) {
+    public boolean allTransactionsValid(Map<String, Long> balances, Transaction[] txs_block) {
+        List<Transaction> txs_conf = Arrays.asList(this.getAllConfirmedTransactions());
+        for (Transaction t : txs_block) {
             String sender = t.getSender();
             String receiver = t.getReceiver();
-            double amount = t.getAmount();
+            long amount = t.getAmount();
             if (sender != null) {
-                bal.put(sender, userBalances.get(sender) - amount);
+                if (t.isTransactionValid()) {
+                    if (balances.containsKey(sender))
+                        balances.put(sender, balances.get(sender) - amount);
+                    else
+                        return false;
+                }
+                // if there is a confirmed transaction with the same signature , transaction is invalid
+                if (txs_conf.stream().anyMatch(o -> o.getSignature() != null && o.getSignature().equals(t.getSignature()))) {
+                    System.err.println("Rejected block! Found duplicate transactions");
+                    return false;
+                }
             }
-            bal.merge(receiver, amount, Double::sum);
+            balances.merge(receiver, amount, Long::sum);
 
-            if (bal.get(sender) < 0 || bal.get(receiver) < 0) {
+            if ((sender != null && balances.get(sender) < 0) || balances.get(receiver) < 0) {
                 System.err.println("Rejected block! Found negative balances");
                 return false;
             }
@@ -314,7 +332,8 @@ public class WalletResource extends DefaultSingleRecoverable {
     }
 
     private void verifyRecTransaction(Transaction t) {
-        if (t.isTransactionValid()) {
+        List<Transaction> txs = Arrays.asList(this.getUnconfirmedTransactions());
+        if (t.isTransactionValid() && txs.stream().noneMatch(o -> o.getSignature().equals(t.getSignature()))) {
             if (this.mem_pool.size() >= 100) {
                 this.mem_pool.remove(0);
             }
@@ -360,14 +379,14 @@ public class WalletResource extends DefaultSingleRecoverable {
             oos.flush();
             eng.update(bos.toByteArray());
 
-            if (!eng.verify(signature)) {
-                System.out.println("Client sent invalid signature!");
-            }
-
-            if (d.hasBlock()) {
-                verifyRecBlock(d.getBlock());
-            } else if (d.hasTransaction()) {
-                verifyRecTransaction(d.getTransaction());
+            if (eng.verify(signature)) {
+                if (d.hasBlock()) {
+                    verifyRecBlock(d.getBlock());
+                } else if (d.hasTransaction()) {
+                    verifyRecTransaction(d.getTransaction());
+                }
+            } else {
+                System.err.println("Client sent invalid signature!");
             }
 
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
@@ -408,7 +427,7 @@ public class WalletResource extends DefaultSingleRecoverable {
         }
     }
 
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) {
         if (args.length < 2) {
             System.out.println("Use: java WalletResource <id> <processId>");
             System.exit(-1);
