@@ -30,8 +30,9 @@ public class Client {
         System.out.println(" ------- P2P Wallet Service client ---------");
         System.out.println(" ( Type help for command list in prompt ) ");
         System.out.println(" -------------------------------------------- ");
+        System.out.println("Node to connect information");
         Scanner scanner = new Scanner(System.in);
-        System.out.print("Server IP: ");
+        System.out.print("IP: ");
         String ip = scanner.nextLine();
         System.out.print("Port: ");
         int port = scanner.nextInt();
@@ -99,6 +100,18 @@ public class Client {
                         System.out.println("Usage: getBalanceOf <public key> ");
                     }
                     break;
+                case "getTotalCoins":
+                    try {
+                        Long coins = getTotalCoins(ip, port);
+                        if (coins != null) {
+                            System.out.println(coins);
+                        } else {
+                            System.out.println("Error making request!");
+                        }
+                    } catch (Exception e) {
+                        System.out.println("Usage: getTotalCoins");
+                    }
+                    break;
                 case "getMemPool":
                     txs = getMemPool(ip, port);
                     if (txs != null) {
@@ -109,10 +122,18 @@ public class Client {
                         System.out.println("Error making request!");
                     }
                     break;
-                case "getLastBlock":
+                case "getLastBlockInfo":
                     Block b = getLastBlock(ip, port);
                     if (b != null) {
                         b.printBlockData();
+                    } else {
+                        System.out.println("Error making request!");
+                    }
+                    break;
+                case "getLastBlockHash":
+                    b = getLastBlock(ip, port);
+                    if (b != null) {
+                        System.out.println(b.getHash());
                     } else {
                         System.out.println("Error making request!");
                     }
@@ -145,8 +166,10 @@ public class Client {
                     System.out.println("allTransactions - Lists all transactions recorded on the ledger.");
                     System.out.println("getTransactionsOf <public key> - Lists all transactions of an account.");
                     System.out.println("getBalanceOf <public key> - Gets current balance of an account.");
+                    System.out.println("getTotalCoins - Get number of coins in the ledger.");
                     System.out.println("getMemPool - Gets unconfirmed transactions stored on node.");
-                    System.out.println("getLastBlock - Gets information of last block mined.");
+                    System.out.println("getLastBlockInfo - Gets information of last block mined.");
+                    System.out.println("getLastBlockHash - Gets hash of last mined block.");
                     System.out.println("mineBlock <public key to receive block reward> - Tries to mine a block (can take some time).");
                     System.out.println("exit - Exits client");
             }
@@ -189,6 +212,26 @@ public class Client {
         javax.ws.rs.client.Client client = ClientBuilder.newClient(config);
         WebTarget target;
         target = client.target(String.format("http://%s:%s/rest", ip, port)).path("wallet/" + URLEncoder.encode(addr, StandardCharsets.UTF_8));
+        Response r = target.request()
+                .get();
+
+        int status = r.getStatus();
+        if (status == Response.Status.OK.getStatusCode() && r.hasEntity()) {
+            return r.readEntity(Long.class);
+        } else {
+            return null;
+        }
+    }
+
+    private static Long getTotalCoins(String ip, int port) {
+        ClientConfig config = new ClientConfig();
+        //How much time until timeout on opening the TCP connection to the server
+        config.property(ClientProperties.CONNECT_TIMEOUT, 10000);
+        //How much time to wait for the reply of the server after sending the request
+        config.property(ClientProperties.READ_TIMEOUT, 5000);
+        javax.ws.rs.client.Client client = ClientBuilder.newClient(config);
+        WebTarget target;
+        target = client.target(String.format("http://%s:%s/rest", ip, port)).path("wallet/totalCoins");
         Response r = target.request()
                 .get();
 
@@ -338,7 +381,7 @@ public class Client {
             timestamp = System.currentTimeMillis();
             try {
                 MessageDigest digest = MessageDigest.getInstance("SHA-256");
-                hash = prev_block.getHash() + nonce + difficulty + (prev_block.getHeight() + 1) + timestamp + new Gson().toJson(txs);
+                hash = prev_block.getHash() + nonce + difficulty + (prev_block.getHeight() + 1) + timestamp + gson.toJson(txs);
                 byte[] encodedHash = digest.digest(hash.getBytes(StandardCharsets.UTF_8));
                 hash = new String(Hex.encode(encodedHash));
             } catch (Exception e) {

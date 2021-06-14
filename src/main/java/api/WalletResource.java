@@ -47,6 +47,7 @@ public class WalletResource extends DefaultSingleRecoverable {
     private List<Transaction> mem_pool;
     private final ServiceProxy proxy;
     private long currHeight;
+    private long numCoins;
     private final int clientID;
     private final ServiceReplica replica;
 
@@ -61,6 +62,7 @@ public class WalletResource extends DefaultSingleRecoverable {
             this.mem_pool = new ArrayList<>();
             this.userBalances = new TreeMap<>();
             this.currHeight = -1;
+            this.numCoins = 0;
         }
     }
 
@@ -171,6 +173,13 @@ public class WalletResource extends DefaultSingleRecoverable {
         synchronized (this) {
             this.sendBlockBFT(b);
         }
+    }
+
+    @GET
+    @Path("/totalCoins")
+    @Produces(MediaType.APPLICATION_JSON)
+    public long getTotalCoins() {
+        return this.numCoins;
     }
 
     @POST
@@ -291,6 +300,9 @@ public class WalletResource extends DefaultSingleRecoverable {
                 long amount = t.getAmount();
                 if (sender != null) {
                     userBalances.put(sender, userBalances.get(sender) - amount);
+                } else {
+                    // if sender is null than coins are being created through mining
+                    this.numCoins += t.getAmount();
                 }
                 userBalances.merge(receiver, amount, Long::sum);
                 this.mem_pool.removeIf(o -> o.getSignature().equals(t.getSignature()));
@@ -407,6 +419,7 @@ public class WalletResource extends DefaultSingleRecoverable {
         this.userBalances = new TreeMap<>();
         this.mem_pool = new ArrayList<>();
         this.currHeight = -1;
+        this.numCoins = 0;
     }
 
     @Override
