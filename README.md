@@ -1,6 +1,6 @@
 # CSD Project
 
-Proof of Work blockchain based on ECDSA (Bouncy Castle) public-key cryptography. To get coins in the start it is needed to mine blocks to get the reward and that can be done using the miner client or the regular client with the 'mineBlock' command. After that, coins can be spent to other addresses if we provided a valid ECDSA public key and we have the private key to spend the coins. Funds sent to invalid addresses are lost forever because they can't be spent.
+Proof of Work blockchain based on ECDSA (Bouncy Castle) public-key cryptography. To get coins in the start it is needed to mine blocks to get the reward and that can be done using the miner client or the regular client with the 'mineBlock' command. After that, coins can be spent to other addresses if we provided a valid ECDSA public key and we have the private key to spend the coins. Funds sent to invalid addresses are lost forever because they can't be spent. Consensus rules can be changed on the ConsensusRules.java class.
 
 ## Installation guide
 
