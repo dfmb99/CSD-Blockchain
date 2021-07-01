@@ -77,7 +77,7 @@ public class WalletResource extends DefaultSingleRecoverable {
 
         String sender = p.getSender();
         Long amount = p.getAmount();
-        if (!hasSpendableBalance(sender, amount)) {
+        if (!hasSpendableBalance(sender, amount) || Arrays.stream(getUnconfirmedTransactions()).anyMatch(t -> t.getSender().equals(sender))) {
             throw new WebApplicationException(Status.CONFLICT);
         }
         Transaction t = new Transaction(sender, p.getReceiver(), amount, p.getTimestamp(), p.getSignature());

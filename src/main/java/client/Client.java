@@ -196,7 +196,7 @@ public class Client {
             if (status == Response.Status.FORBIDDEN.getStatusCode()) {
                 System.out.println("Invalid signature!");
             } else if (status == Response.Status.CONFLICT.getStatusCode()) {
-                System.out.println("Not enough balance to do transaction!");
+                System.out.println("Not enough balance / one transaction from sender already in memory pool (prevent spam transactions)!");
             } else {
                 System.out.println("Invalid transaction!");
             }
@@ -357,6 +357,7 @@ public class Client {
         if (txs == null) {
             txs = new Transaction[1];
         }
+
         // if there is no last block, we are mining the genesis block
         if (b == null) {
             b = new Block("", "", "", -1, -1, -1, null);
